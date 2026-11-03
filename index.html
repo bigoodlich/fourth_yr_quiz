@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Live Cohort Quiz</title>
+  <!-- Tailwind CSS & QR Code Generator -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <!-- Firebase Compat SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+</head>
+<body class="bg-slate-950 text-white min-h-screen font-sans selection:bg-indigo-500 selection:text-white">
+
+  <!-- ==================== SETUP VIEW ==================== -->
+  <div id="setup-view" class="max-w-xl mx-auto p-8 mt-12 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl">
+    <h2 class="text-3xl font-extrabold mb-2 text-emerald-400">Quiz Control Setup</h2>
+    <p class="text-sm text-slate-400 mb-6">Paste your Firebase configuration object below to launch.</p>
+    <textarea id="fb-config-input" rows="7" class="w-full p-3 bg-slate-950 border border-slate-700 rounded-xl text-xs font-mono text-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-500" placeholder='{ "apiKey": "...", "databaseURL": "..." }'></textarea>
+    
+    <div class="mt-6 flex gap-4">
+      <button onclick="startApp('host')" class="flex-1 bg-emerald-600 hover:bg-emerald-500 py-3.5 rounded-xl font-bold tracking-wide transition shadow-lg hover:shadow-emerald-900/40">Launch Host View</button>
+      <button onclick="startApp('student')" class="flex-1 bg-indigo-600 hover:bg-indigo-500 py-3.5 rounded-xl font-bold tracking-wide transition shadow-lg hover:shadow-indigo-900/40">Launch Student View</button>
+    </div>
+  </div>
+
+  <!-- ==================== HOST / PRESENTER VIEW ==================== -->
+  <div id="host-view" class="hidden max-w-5xl mx-auto p-6 text-center">
+    <!-- Lobby Stage -->
+    <div id="host-lobby" class="py-12">
+      <h1 class="text-5xl font-black mb-3 text-indigo-400 tracking-tight">Join the Live Quiz!</h1>
+      <p class="text-slate-400 text-lg mb-8">Scan the QR code with your mobile camera to join</p>
+      
+      <div class="inline-block p-5 bg-white rounded-3xl shadow-2xl mb-8">
+        <div id="qrcode"></div>
+      </div>
+
+      <div class="text-3xl font-bold text-slate-300">
+        Students Joined: <span id="player-count" class="text-emerald-400 font-extrabold ml-1">0</span>
+      </div>
+      
+      <div class="mt-10">
+        <button onclick="nextQuestion()" class="px-10 py-4 bg-indigo-600 hover:bg-indigo-500 rounded-2xl text-xl font-black shadow-xl hover:scale-105 transition active:scale-95">Start First Question</button>
+      </div>
+    </div>
+
+    <!-- Active Question Stage -->
+    <div id="host-question" class="hidden">
+      <div class="flex justify-between items-center text-slate-400 mb-6 bg-slate-900/80 p-4 rounded-xl border border-slate-800">
+        <span id="host-q-index" class="text-lg font-bold text-indigo-300">Question 1</span>
+        <span id="host-timer" class="text-3xl font-black text-amber-400">30s</span>
+        <span class="text-lg">Answers: <span id="answers-in-count" class="font-extrabold text-emerald-400">0</span></span>
+      </div>
+
+      <h2 id="host-q-text" class="text-3xl font-extrabold mb-8 p-8 bg-slate-900 border border-slate-800 rounded-2xl leading-relaxed text-slate-100 shadow-md">Question Text</h2>
+      
+      <div id="host-options-container" class="grid grid-cols-1 md:grid-cols-2 gap-4 text-left text-xl font-bold mb-8"></div>
+
+      <div class="flex justify-center gap-4">
+        <button onclick="revealAnswer()" class="px-8 py-3.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl font-extrabold transition shadow-lg">Reveal Answer</button>
+        <button onclick="showLeaderboard()" class="px-8 py-3.5 bg-purple-600 hover:bg-purple-500 rounded-xl font-extrabold transition shadow-lg">Show Leaderboard</button>
+      </div>
+    </div>
+
+    <!-- Leaderboard Stage -->
+    <div id="host-leaderboard" class="hidden py-8">
+      <h2 class="text-4xl font-black text-amber-400 mb-8">🏆 Leaderboard</h2>
+      <div id="leaderboard-list" class="max-w-lg mx-auto space-y-3 mb-10"></div>
+      <button onclick="nextQuestion()" class="px-10 py-4 bg-indigo-600 hover:bg-indigo-500 rounded-2xl font-black text-xl shadow-xl hover:scale-105 transition">Next Question</button>
+    </div>
+  </div>
+
+  <!-- ==================== STUDENT VIEW ==================== -->
+  <div id="student-view" class="hidden max-w-md mx-auto p-4 text-center">
+    <!-- Student Join Screen -->
+    <div id="student-join" class="mt-16 bg-slate-900 p-8 rounded-2xl border border-slate-800 shadow-xl">
+      <h2 class="text-2xl font-black mb-2 text-indigo-400">Enter Your Nickname</h2>
+      <p class="text-xs text-slate-400 mb-6">Choose a fun pseudonym for the leaderboard</p>
+      <input id="student-name-input" type="text" maxlength="20" placeholder="e.g., SwiftOtter" class="w-full p-4 bg-slate-950 border border-slate-700 rounded-xl text-center font-bold text-xl mb-6 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+      <button onclick="joinQuiz()" class="w-full py-4 bg-emerald-600 hover:bg-emerald-500 rounded-xl font-extrabold text-lg shadow-lg active:scale-95 transition">Join Room</button>
+    </div>
+
+    <!-- Student Waiting Screen -->
+    <div id="student-wait" class="hidden mt-24">
+      <div class="animate-pulse text-2xl font-extrabold text-slate-200">Look at the big screen!</div>
+      <p id="student-wait-sub" class="text-slate-400 text-sm mt-3">Waiting for the host to start...</p>
+    </div>
+
+    <!-- Student Controller Grid -->
+    <div id="student-buttons" class="hidden mt-6">
+      <div id="student-btn-container" class="grid grid-cols-2 gap-3 min-h-[360px]"></div>
+    </div>
+  </div>
+
+  <script>
+    const PALETTE = [
+      'bg-red-600', 'bg-blue-600', 'bg-amber-600', 'bg-emerald-600',
+      'bg-purple-600', 'bg-pink-600', 'bg-cyan-600', 'bg-orange-600',
+      'bg-lime-600', 'bg-indigo-600', 'bg-teal-600', 'bg-fuchsia-600',
+      'bg-rose-600'
+    ];
+
+    let quizQuestions = [];
+    let db, currentRole = '', currentStudentId = '', currentQIdx = -1, timerInterval;
+
+    function sanitizeConfig(raw) {
+      return raw.replace(/\/\*[\s\S]*?\*\/|([^:]|^)\/\/.*$/gm, '')
+                .replace(/(const|let|var)\s+firebaseConfig\s*=\s*/, '')
+                .replace(/;+\s*$/, '').trim();
+    }
+
+    function extractOptions(item) {
+      const options = [];
+      const reservedKeys = ['q', 'question', 'correct', 'answer', 'timer', 'title', 'id'];
+
+      Object.keys(item).forEach(key => {
+        const cleanKey = key.trim();
+        // Ignore question text, correct key, and metadata
+        if (reservedKeys.includes(cleanKey.toLowerCase())) return;
+
+        // Match option keys like 'a', 'b', 'OptionA', 'Option_C'
+        const match = cleanKey.match(/^(?:option[_\s]*)?([a-p])$/i);
+        if (match) {
+          options.push({
+            letter: match[1].toUpperCase(),
+            text: item[key]
+          });
+        }
+      });
+
+      return options.sort((x, y) => x.letter.localeCompare(y.letter));
+    }
+
+    function startApp(role) {
+      currentRole = role;
+      const rawCfg = document.getElementById('fb-config-input').value;
+      if (!rawCfg) return alert("Please paste your Firebase configuration.");
+
+      try {
+        const cleanJson = sanitizeConfig(rawCfg);
+        const config = JSON.parse(cleanJson);
+        if (!firebase.apps.length) firebase.initializeApp(config);
+        db = firebase.database();
+      } catch (err) {
+        return alert("Failed to parse Firebase config. Please verify JSON format.");
+      }
+
+      document.getElementById('setup-view').classList.add('hidden');
+
+      if (role === 'host') {
+        document.getElementById('host-view').classList.remove('hidden');
+        initHost();
+      } else {
+        document.getElementById('student-view').classList.remove('hidden');
+      }
+    }
+
+    // --- HOST LOGIC ---
+    function initHost() {
+      // 1. Fetch questions directly from Firebase root
+      db.ref('/').once('value', snapshot => {
+        const data = snapshot.val() || {};
+        quizQuestions = Object.keys(data)
+          .filter(k => !isNaN(k))
+          .sort((a, b) => Number(a) - Number(b))
+          .map(k => {
+            const item = data[k];
+            return {
+              q: item.q || item.question || item.Question,
+              options: extractOptions(item),
+              correct: (item.correct || item.Correct || item.answer || 'A').toString().trim().toUpperCase()
+            };
+          });
+      });
+
+      // 2. Generate QR Code pointing to this web page
+      const studentUrl = window.location.href.split('?')[0] + "?role=student";
+      new QRCode(document.getElementById("qrcode"), { text: studentUrl, width: 220, height: 220 });
+
+      // 3. Track joined players
+      db.ref('players').on('value', snap => {
+        const players = snap.val() || {};
+        document.getElementById('player-count').innerText = Object.keys(players).length;
+      });
+
+      // 4. Track answers received
+      db.ref('answers').on('value', snap => {
+        const answers = snap.val() || {};
+        document.getElementById('answers-in-count').innerText = Object.keys(answers).length;
+      });
+    }
+
+    function nextQuestion() {
+      currentQIdx++;
+      if (currentQIdx >= quizQuestions.length) {
+        alert("Quiz Finished!");
+        return;
+      }
+
+      db.ref('answers').remove();
+      const q = quizQuestions[currentQIdx];
+
+      db.ref('gameState').set({
+        stage: 'question',
+        questionIndex: currentQIdx,
+        optionLetters: q.options.map(o => o.letter)
+      });
+
+      // Show question stage
+      document.getElementById('host-lobby').classList.add('hidden');
+      document.getElementById('host-leaderboard').classList.add('hidden');
+      document.getElementById('host-question').classList.remove('hidden');
+
+      document.getElementById('host-q-index').innerText = `Question ${currentQIdx + 1} of ${quizQuestions.length}`;
+      document.getElementById('host-q-text').innerText = q.q;
+
+      // Render options dynamically (excluding question text)
+      const container = document.getElementById('host-options-container');
+      container.innerHTML = q.options.map((opt, idx) => `
+        <div id="opt-box-${opt.letter}" class="p-6 ${PALETTE[idx % PALETTE.length]} rounded-2xl flex items-center gap-3 transition">
+          <span class="w-9 h-9 flex items-center justify-center bg-black/30 rounded-lg text-lg font-black">${opt.letter}</span>
+          <span class="text-lg leading-tight font-semibold">${opt.text}</span>
+        </div>
+      `).join('');
+
+      // 30s Timer
+      let timeLeft = 30;
+      document.getElementById('host-timer').innerText = `${timeLeft}s`;
+      clearInterval(timerInterval);
+      timerInterval = setInterval(() => {
+        timeLeft--;
+        document.getElementById('host-timer').innerText = `${timeLeft}s`;
+        if (timeLeft <= 0) {
+          clearInterval(timerInterval);
+          revealAnswer();
+        }
+      }, 1000);
+    }
+
+    function revealAnswer() {
+      clearInterval(timerInterval);
+      const q = quizQuestions[currentQIdx];
+
+      q.options.forEach(opt => {
+        const box = document.getElementById(`opt-box-${opt.letter}`);
+        if (!box) return;
+        if (opt.letter === q.correct) {
+          box.classList.add('ring-8', 'ring-white', 'scale-[1.02]');
+        } else {
+          box.classList.add('opacity-30');
+        }
+      });
+
+      // Grade submissions (+100 points for correct)
+      db.ref('answers').once('value', snap => {
+        const answers = snap.val() || {};
+        Object.keys(answers).forEach(pid => {
+          if (answers[pid] === q.correct) {
+            db.ref(`players/${pid}/score`).transaction(s => (s || 0) + 100);
+          }
+        });
+      });
+    }
+
+    function showLeaderboard() {
+      document.getElementById('host-question').classList.add('hidden');
+      document.getElementById('host-leaderboard').classList.remove('hidden');
+      
+      db.ref('players').once('value', snap => {
+        const players = snap.val() || {};
+        const sorted = Object.values(players).sort((a,b) => (b.score || 0) - (a.score || 0)).slice(0, 5);
+
+        const listDiv = document.getElementById('leaderboard-list');
+        listDiv.innerHTML = sorted.map((p, idx) => `
+          <div class="flex justify-between items-center p-4 bg-slate-900 rounded-xl border border-slate-800 font-bold text-lg">
+            <span>#${idx + 1} ${p.name}</span>
+            <span class="text-amber-400 font-mono">${p.score || 0} pts</span>
+          </div>
+        `).join('');
+      });
+    }
+
+    // --- STUDENT LOGIC ---
+    function joinQuiz() {
+      const name = document.getElementById('student-name-input').value.trim();
+      if (!name) return alert("Please enter a nickname.");
+
+      currentStudentId = 'stu_' + Math.random().toString(36).substring(2, 9);
+      db.ref(`players/${currentStudentId}`).set({ name: name, score: 0 });
+
+      document.getElementById('student-join').classList.add('hidden');
+      document.getElementById('student-wait').classList.remove('hidden');
+
+      // Sync state with host
+      db.ref('gameState').on('value', snap => {
+        const state = snap.val();
+        if (!state) return;
+        
+        if (state.stage === 'question') {
+          document.getElementById('student-wait').classList.add('hidden');
+          document.getElementById('student-buttons').classList.remove('hidden');
+          renderStudentButtons(state.optionLetters || ['A', 'B', 'C', 'D']);
+        } else {
+          document.getElementById('student-buttons').classList.add('hidden');
+          document.getElementById('student-wait').classList.remove('hidden');
+        }
+      });
+    }
+
+    function renderStudentButtons(letters) {
+      const container = document.getElementById('student-btn-container');
+      container.innerHTML = letters.map((ltr, idx) => `
+        <button onclick="submitAnswer('${ltr}')" class="${PALETTE[idx % PALETTE.length]} active:scale-95 text-3xl font-black rounded-2xl shadow-lg flex items-center justify-center p-6 transition">
+          ${ltr}
+        </button>
+      `).join('');
+    }
+
+    function submitAnswer(choice) {
+      db.ref(`answers/${currentStudentId}`).set(choice);
+      document.getElementById('student-buttons').classList.add('hidden');
+      document.getElementById('student-wait').classList.remove('hidden');
+      document.getElementById('student-wait-sub').innerText = `Answer ${choice} submitted! Waiting for reveal...`;
+    }
+
+    // Auto-detect URL parameter ?role=student
+    window.addEventListener('load', () => {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('role') === 'student') {
+        document.getElementById('setup-view').classList.add('hidden');
+        document.getElementById('student-view').classList.remove('hidden');
+      }
+    });
+  </script>
+</body>
+</html>
